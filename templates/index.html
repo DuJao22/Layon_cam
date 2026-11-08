@@ -45,13 +45,20 @@ small{color:var(--muted)}.notice{font-size:13px;color:#c3c9d8}
 </div>
 <p class="notice">Use somente em dispositivos e ambientes em que você tenha autorização. A câmera e a gravação exibem seus estados na tela.</p>
 </main>
-<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+<script src="/static/socket.io.min.js"></script>
 <script>
-const socket=io(); let code="",pc=null,stream=null,role="",facing="environment",recorder=null,chunks=[];
 const $=id=>document.getElementById(id);
 function status(id,msg){$(id).textContent=msg}
+if(typeof io!=="function"){status("cameraStatus","A biblioteca de conexão não carregou. Recarregue a página.");throw Error("Socket.IO client failed to load");}
+const socket=io(); let code="",pc=null,stream=null,role="camera",facing="environment",recorder=null,chunks=[];
 function show(which){$("cameraPanel").classList.toggle("hidden",which!=="camera");$("viewerPanel").classList.toggle("hidden",which!=="viewer")}
-$("cameraTab").onclick=()=>show("camera");$("viewerTab").onclick=()=>show("viewer");
+$("cameraTab").onclick=()=>{role="camera";show("camera")};$("viewerTab").onclick=()=>{role="viewer";show("viewer")};
+socket.on("connect",()=>{
+ if(role==="camera")status("cameraStatus",code?"Servidor reconectado. Crie uma nova conexão.":"Servidor conectado. Toque em Criar conexão.");
+ else status("viewerStatus",code?"Servidor reconectado. Conecte-se novamente à câmera.":"Servidor conectado. Digite o código da câmera.");
+});
+socket.on("connect_error",e=>status(role==="camera"?"cameraStatus":"viewerStatus","Falha ao conectar ao servidor: "+e.message));
+socket.on("disconnect",()=>{if(role)status(role==="camera"?"cameraStatus":"viewerStatus","Conexão com o servidor perdida. Recarregue a página e tente novamente.")});
 function newPC(){
  if(pc)pc.close();
  pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
@@ -60,7 +67,7 @@ function newPC(){
  pc.onconnectionstatechange=()=>{if(pc)status(role==="camera"?"cameraStatus":"viewerStatus","Conexão: "+pc.connectionState)};
  return pc;
 }
-$("create").onclick=()=>{role="camera";socket.emit("create_room");};
+$("create").onclick=()=>{role="camera";status("cameraStatus","Solicitando criação da conexão...");socket.emit("create_room");};
 socket.on("room_created",d=>{code=d.code;$("roomCode").textContent=code;$("roomBox").classList.remove("hidden");status("cameraStatus","Código criado. Agora conecte o celular Y.");});
 $("copy").onclick=async()=>{await navigator.clipboard.writeText(code);status("cameraStatus","Código copiado.");};
 async function startCam(){
