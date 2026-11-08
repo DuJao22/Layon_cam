@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#090b13">
+<title>Layon Cam</title>
+<link rel="manifest" href="/static/manifest.json">
+<style>
+:root{color-scheme:dark;--bg:#090b13;--panel:#131827;--line:#273149;--accent:#8b7cff;--muted:#aab2c5}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -10%,#222044,var(--bg) 50%);color:#f6f7fb;font:16px system-ui,sans-serif;min-height:100vh}
+main{width:min(760px,100%);margin:auto;padding:22px 16px 48px}.brand{font-weight:800;letter-spacing:.12em;color:#bcb3ff;font-size:13px}
+h1{font-size:clamp(30px,7vw,48px);margin:8px 0}p{color:var(--muted);line-height:1.5}
+.panel{background:#131827dd;border:1px solid var(--line);border-radius:22px;padding:18px;margin:16px 0;box-shadow:0 18px 50px #0004}
+.tabs{display:flex;gap:8px}.tabs button{flex:1}.btn{border:0;border-radius:13px;padding:13px 16px;background:var(--accent);color:white;font-weight:750;font-size:15px;cursor:pointer}.btn.secondary{background:#252d43;border:1px solid #3a4561}.btn.danger{background:#b93850}.btn:disabled{opacity:.45}
+input{width:100%;padding:14px;border-radius:12px;background:#0b1020;border:1px solid #39445e;color:white;font-size:18px;letter-spacing:.12em;text-transform:uppercase;margin:8px 0 12px}
+video{width:100%;background:#05070c;border-radius:16px;max-height:58vh;object-fit:contain}.status{padding:10px 12px;background:#0b1020;border:1px solid var(--line);border-radius:12px;color:#cbd3e7;font-size:14px;margin-top:12px}
+.row{display:flex;gap:9px;flex-wrap:wrap}.row>*{flex:1}.hidden{display:none!important}.code{font-size:30px;font-weight:850;letter-spacing:.2em;color:#c7c0ff;text-align:center;padding:10px}
+small{color:var(--muted)}.notice{font-size:13px;color:#c3c9d8}
+</style>
+</head>
+<body><main>
+<div class="brand">LAYON.DEV · CAMERA SYSTEM</div>
+<h1>Layon Cam</h1>
+<p>Transforme um celular em câmera e acompanhe a transmissão ao vivo em outro aparelho.</p>
+<div class="panel">
+ <div class="tabs"><button class="btn secondary" id="cameraTab">Celular X · Câmera</button><button class="btn secondary" id="viewerTab">Celular Y · Monitor</button></div>
+ <section id="cameraPanel">
+  <h2>Configurar câmera</h2>
+  <p>Abra esta tela no celular que ficará filmando. Permita o uso da câmera e do microfone.</p>
+  <button class="btn" id="create">Criar conexão</button>
+  <div id="roomBox" class="hidden"><p>Digite este código no celular monitor:</p><div class="code" id="roomCode">------</div><div class="row"><button class="btn secondary" id="copy">Copiar código</button><button class="btn secondary" id="startCamera">Ativar câmera</button></div></div>
+  <video id="localVideo" autoplay muted playsinline class="hidden"></video>
+  <div class="row" style="margin-top:10px"><button class="btn secondary" id="flip" disabled>Trocar câmera</button><button class="btn danger" id="stopCamera" disabled>Desligar câmera</button></div>
+  <div class="status" id="cameraStatus">Aguardando criação da conexão.</div>
+ </section>
+ <section id="viewerPanel" class="hidden">
+  <h2>Monitor ao vivo</h2><p>Digite o código mostrado no celular câmera.</p>
+  <input id="codeInput" maxlength="6" placeholder="EX: A8K2QZ" autocomplete="off">
+  <button class="btn" id="connect">Conectar ao celular X</button>
+  <video id="remoteVideo" autoplay playsinline controls></video>
+  <div class="row" style="margin-top:10px"><button class="btn" id="recordStart" disabled>● Iniciar gravação no X</button><button class="btn danger" id="recordStop" disabled>Parar gravação</button></div>
+  <div class="status" id="viewerStatus">Desconectado.</div>
+  <p class="notice">A gravação é salva pelo navegador no celular X. O comando de gravação é enviado pelo monitor.</p>
+ </section>
+</div>
+<p class="notice">Use somente em dispositivos e ambientes em que você tenha autorização. A câmera e a gravação exibem seus estados na tela.</p>
+</main>
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+<script>
+const socket=io(); let code="",pc=null,stream=null,role="",facing="environment",recorder=null,chunks=[];
+const $=id=>document.getElementById(id);
+function status(id,msg){$(id).textContent=msg}
+function show(which){$("cameraPanel").classList.toggle("hidden",which!=="camera");$("viewerPanel").classList.toggle("hidden",which!=="viewer")}
+$("cameraTab").onclick=()=>show("camera");$("viewerTab").onclick=()=>show("viewer");
+function newPC(){
+ if(pc)pc.close();
+ pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+ pc.onicecandidate=e=>{if(e.candidate)socket.emit("signal",{code,payload:{candidate:e.candidate}})};
+ pc.ontrack=e=>{$("remoteVideo").srcObject=e.streams[0];status("viewerStatus","Transmissão recebida ao vivo.")};
+ pc.onconnectionstatechange=()=>{if(pc)status(role==="camera"?"cameraStatus":"viewerStatus","Conexão: "+pc.connectionState)};
+ return pc;
+}
+$("create").onclick=()=>{role="camera";socket.emit("create_room");};
+socket.on("room_created",d=>{code=d.code;$("roomCode").textContent=code;$("roomBox").classList.remove("hidden");status("cameraStatus","Código criado. Agora conecte o celular Y.");});
+$("copy").onclick=async()=>{await navigator.clipboard.writeText(code);status("cameraStatus","Código copiado.");};
+async function startCam(){
+ try{
+  if(!window.isSecureContext && location.hostname!=="localhost" && location.hostname!=="127.0.0.1")throw Error("O navegador exige HTTPS para liberar câmera/microfone. Consulte o README.");
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing},audio:true});
+  $("localVideo").srcObject=stream;$("localVideo").classList.remove("hidden");
+  $("stopCamera").disabled=false;$("flip").disabled=false;
+  status("cameraStatus","Câmera ativa. Aguardando o celular Y conectar.");
+  if(pc)stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+ }catch(e){status("cameraStatus","Não foi possível abrir a câmera: "+e.message);}
+}
+$("startCamera").onclick=startCam;
+$("stopCamera").onclick=()=>{if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;$("localVideo").classList.add("hidden");$("stopCamera").disabled=true;status("cameraStatus","Câmera desligada.");};
+$("flip").onclick=async()=>{facing=facing==="environment"?"user":"environment";if(stream)stream.getTracks().forEach(t=>t.stop());await startCam();};
+$("connect").onclick=()=>{role="viewer";code=$("codeInput").value.trim().toUpperCase();if(code.length!==6){status("viewerStatus","Digite um código de 6 caracteres.");return;}socket.emit("join_room",{code,role});status("viewerStatus","Conectando...");};
+socket.on("joined",d=>{if(d.role==="viewer"){$("recordStart").disabled=false;status("viewerStatus","Conectado à sala. Preparando vídeo...");}});
+socket.on("peer_ready",async()=>{if(role==="camera"){
+ if(!stream){status("cameraStatus","O celular Y entrou. Toque em Ativar câmera.");return;}
+ newPC();stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+ const offer=await pc.createOffer();await pc.setLocalDescription(offer);
+ socket.emit("signal",{code,payload:{description:pc.localDescription}});
+ }});
+socket.on("signal",async p=>{try{
+ if(p.description){
+  if(role==="viewer"){newPC();await pc.setRemoteDescription(p.description);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);socket.emit("signal",{code,payload:{description:pc.localDescription}});}
+  else if(role==="camera"&&pc){await pc.setRemoteDescription(p.description);}
+ }else if(p.candidate&&pc){await pc.addIceCandidate(p.candidate);}
+ }catch(e){status(role==="camera"?"cameraStatus":"viewerStatus","Falha na conexão de vídeo: "+e.message);}});
+socket.on("join_error",d=>status(role==="camera"?"cameraStatus":"viewerStatus",d.message));
+$("recordStart").onclick=()=>{socket.emit("remote_record",{code,action:"start"});$("recordStart").disabled=true;$("recordStop").disabled=false;status("viewerStatus","Pedido para iniciar gravação enviado ao celular X.");};
+$("recordStop").onclick=()=>{socket.emit("remote_record",{code,action:"stop"});$("recordStart").disabled=false;$("recordStop").disabled=true;status("viewerStatus","Pedido para parar gravação enviado ao celular X.");};
+socket.on("remote_record",async d=>{
+ if(role!=="camera")return;
+ if(d.action==="start"){
+  if(!stream){status("cameraStatus","Ative a câmera antes de gravar.");return;}
+  try{
+   chunks=[];const mime=MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")?"video/webm;codecs=vp9,opus":"video/webm";
+   recorder=new MediaRecorder(stream,{mimeType:mime});recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+   recorder.onstop=()=>{const blob=new Blob(chunks,{type:mime});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="layon-cam-"+new Date().toISOString().replaceAll(":","-")+".webm";a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);status("cameraStatus","Gravação finalizada e baixada neste celular.");};
+   recorder.start(1000);status("cameraStatus","● GRAVANDO. O vídeo será salvo neste celular ao parar.");
+  }catch(e){status("cameraStatus","Erro ao gravar: "+e.message);}
+ }else if(d.action==="stop"&&recorder&&recorder.state!=="inactive"){recorder.stop();}
+});
+if("serviceWorker" in navigator)navigator.serviceWorker.register("/static/sw.js").catch(()=>{});
+</script></body></html>

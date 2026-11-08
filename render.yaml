@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: layon-cam
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 100 --bind 0.0.0.0:$PORT app:app
+    healthCheckPath: /
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
